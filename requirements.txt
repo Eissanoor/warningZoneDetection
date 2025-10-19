@@ -1,0 +1,9 @@
+# Basic packages that work with Python 3.14
+streamlit
+numpy
+Pillow
+pyyaml
+matplotlib
+pandas
+tqdm
+psutil

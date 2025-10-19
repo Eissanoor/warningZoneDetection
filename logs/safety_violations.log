@@ -1,0 +1,10 @@
+
+[2025-10-19 18:06:25] Safety Violations:
+  - No helmet detected! (Confidence: 0.85)
+  - No gloves detected! (Confidence: 0.78)
+  - Person detected in warning zone! (Confidence: 0.92)
+--------------------------------------------------
+
+[2025-10-19 18:06:28] Safety Violations:
+  - Test: No helmet detected! (Confidence: 0.85)
+--------------------------------------------------

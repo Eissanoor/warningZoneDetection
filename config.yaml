@@ -1,0 +1,108 @@
+# Warehouse Safety Monitoring System Configuration
+
+# Detection Settings
+detection:
+  # Confidence thresholds for different detection types
+  confidence_threshold: 0.5
+  helmet_threshold: 0.6
+  glove_threshold: 0.5
+  warning_zone_threshold: 0.4
+  
+  # Enable/disable detection types
+  helmet_detection: true
+  glove_detection: true
+  warning_zone_detection: true
+  person_detection: true
+
+# Model Settings
+models:
+  # Device for inference ('cpu' or 'cuda')
+  device: 'cpu'
+  
+  # Model size ('n', 's', 'm', 'l', 'x')
+  model_size: 'n'
+  
+  # Training settings
+  epochs: 50
+  batch_size: 16
+  image_size: 640
+
+# Alarm Settings
+alarm:
+  # Enable audio alerts
+  enable_sound: true
+  
+  # Enable visual alerts
+  enable_visual: true
+  
+  # Alarm duration in seconds
+  duration: 5
+  
+  # Alarm sound frequency (Hz)
+  sound_frequency: 800
+
+# Camera Settings
+camera:
+  # Default camera index
+  default_index: 0
+  
+  # Camera resolution
+  width: 1280
+  height: 720
+  
+  # FPS for live monitoring
+  fps: 30
+
+# File Paths
+paths:
+  # Dataset paths
+  helmet_dataset: "dataset/helmet/data.yaml"
+  glove_dataset: "dataset/glove/data.yaml"
+  warning_zone_dataset: "dataset/warningZone/data.yaml"
+  
+  # Output paths
+  models_dir: "models"
+  logs_dir: "logs"
+  output_dir: "output"
+  screenshots_dir: "screenshots"
+
+# Logging Settings
+logging:
+  # Log level ('DEBUG', 'INFO', 'WARNING', 'ERROR')
+  level: 'INFO'
+  
+  # Log file path
+  file: "logs/warehouse_safety.log"
+  
+  # Maximum log file size in MB
+  max_size: 10
+  
+  # Number of backup log files
+  backup_count: 5
+
+# Web Interface Settings
+web_interface:
+  # Streamlit settings
+  page_title: "Warehouse Safety Monitor"
+  page_icon: "🏭"
+  layout: "wide"
+  
+  # Theme settings
+  theme:
+    primary_color: "#1f77b4"
+    background_color: "#ffffff"
+    secondary_background_color: "#f0f2f6"
+
+# Safety Thresholds
+safety:
+  # Maximum violations before emergency alert
+  max_violations_per_minute: 5
+  
+  # Warning zone violation severity
+  warning_zone_severity: "high"
+  
+  # Helmet violation severity
+  helmet_violation_severity: "medium"
+  
+  # Glove violation severity
+  glove_violation_severity: "medium"
