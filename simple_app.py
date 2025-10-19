@@ -59,17 +59,21 @@ class SimpleSafetyDetector:
             # Detect faces (for improved helmet and glove logic)
             face_boxes = self._detect_faces(img_array)
             
-            # Determine if there is likely a whole person (not just a hand)
-            # Need much higher skin percentage for full person vs just a hand
-            person_present = bool(face_boxes) or image_analysis.get('skin_percentage', 0.0) > 0.20
+            # Treat as a person ONLY when a face is found. This avoids
+            # helmet/warning-zone false positives on hand-only images.
+            person_present = bool(face_boxes)
             
             # Only run specific detections based on what we see
             self.logger.info(f"Image analysis: {image_analysis}")
             
             # Check for helmet violations using faces when available
+            helmet_present = False
             if person_present and face_boxes:
                 for (x1, y1, x2, y2) in face_boxes:
-                    if self._helmet_missing_near_face(img_array, (x1, y1, x2, y2)):
+                    # Track if helmet likely present near this face
+                    if not self._helmet_missing_near_face(img_array, (x1, y1, x2, y2)):
+                        helmet_present = True
+                    else:
                         violations.append({
                             'type': 'helmet_violation',
                             'message': 'No helmet detected!',
@@ -88,7 +92,8 @@ class SimpleSafetyDetector:
                     })
             
             # Check for glove violations only if we detect hand-like content
-            if image_analysis['has_hand_like_content'] and self._simulate_glove_violation(img_array, face_boxes):
+            # and there isn't already clear evidence of a helmet (scene is helmet-focused)
+            if (not helmet_present) and image_analysis['has_hand_like_content'] and self._simulate_glove_violation(img_array, face_boxes):
                 # Calculate better bounding box for hands
                 height, width = img_array.shape[:2]
                 bbox = self._calculate_hand_bbox(width, height)
@@ -99,7 +104,7 @@ class SimpleSafetyDetector:
                     'bbox': bbox
                 })
             
-            # Check for warning zone violations only if we detect people (not just hands)
+            # Check for warning zone violations only when a face is detected
             if person_present and self._simulate_warning_zone_violation(img_array):
                 # Calculate better bounding box for person
                 height, width = img_array.shape[:2]
@@ -236,9 +241,30 @@ class SimpleSafetyDetector:
             green_channel = green_channel.copy(); green_channel[~mask] = 0
             blue_channel = blue_channel.copy(); blue_channel[~mask] = 0
         
-        # Look for skin-like colors (more sophisticated detection)
-        # Skin tones typically have: red > green > blue, and red > 100
-        skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
+        # Look for skin-like colors (more robust using HSV as well)
+        # RGB heuristic
+        skin_like_rgb = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
+        # HSV heuristic to reject purple/blue gloves
+        try:
+            hsv = None
+            if cv2 is not None:
+                hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+        except Exception:
+            hsv = None
+        if hsv is not None:
+            h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+            # Skin typically: low-to-medium hue, sufficient saturation and value
+            skin_like_hsv = (h < 25) | (h > 160)
+            skin_like_hsv = skin_like_hsv & (s > 40) & (v > 50)
+            skin_like = skin_like_rgb | skin_like_hsv
+            # Glove colors: purple/blue/gray commonly used for disposable gloves
+            purple_mask = ((h >= 120) & (h <= 155)) & (s > 50) & (v > 40)
+            blue_mask = ((h >= 90) & (h < 120)) & (s > 40) & (v > 40)
+            gray_mask = (s < 30) & (v > 60) & (v < 210)
+            glove_colored_ratio = (np.sum(purple_mask | blue_mask | gray_mask) / (img_array.shape[0] * img_array.shape[1]))
+        else:
+            skin_like = skin_like_rgb
+            glove_colored_ratio = 0.0
         skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
         
         # Check for hand-like features
@@ -248,10 +274,9 @@ class SimpleSafetyDetector:
         # Calculate image complexity
         color_variance = np.var(img_array)
         
-        # For glove detection, we want to detect bare hands
-        # This should trigger when we see skin-like regions that could be hands
-        # But not on very simple images (like solid colors)
-        has_skin_content = skin_percentage > 0.05  # At least 5% skin-like pixels
+        # For glove detection, we want to detect bare hands.
+        # Only trigger if skin signal is clearly stronger than glove-like colors.
+        has_skin_content = skin_percentage > 0.06 and skin_percentage > (glove_colored_ratio * 1.5)
         has_complexity = color_variance > 500  # Some color variation
         has_reasonable_size = height > 100 and width > 100  # Not too small
         
@@ -366,10 +391,11 @@ class SimpleSafetyDetector:
             return True
         r, g, b = region[:, :, 0], region[:, :, 1], region[:, :, 2]
         bright = (r > 200) | (g > 200) | (b > 200)
-        high_vis = ((r > 180) & (g > 180) & (b < 110)) | ((r > 200) & (g > 150) & (b < 110)) | ((r < 110) & (g > 200) & (b < 110))
+        high_vis = ((r > 180) & (g > 180) & (b < 120)) | ((r > 200) & (g > 150) & (b < 120)) | ((r < 120) & (g > 200) & (b < 120))
         helmet_ratio = (np.sum(bright | high_vis) / (region.shape[0] * region.shape[1])) if region.size else 0.0
         # If enough bright/high-vis pixels are above the face, assume helmet present
-        return helmet_ratio < 0.06
+        # Lower threshold reduces false positives when helmets are present
+        return helmet_ratio < 0.03
 
 class SimpleAlarmSystem:
     """Simple alarm system using winsound"""
