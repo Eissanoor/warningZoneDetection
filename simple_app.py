@@ -5,6 +5,10 @@ A basic version that works with available packages
 """
 
 import numpy as np
+try:
+    import cv2  # Optional, used for face-based heuristics
+except Exception:  # pragma: no cover
+    cv2 = None
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -25,6 +29,15 @@ class SimpleSafetyDetector:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        # Initialize face detector if OpenCV is available
+        self.face_cascade = None
+        if cv2 is not None:
+            try:
+                self.face_cascade = cv2.CascadeClassifier(
+                    getattr(cv2, 'data').haarcascades + 'haarcascade_frontalface_default.xml'
+                )
+            except Exception:
+                self.face_cascade = None
         
     def detect_safety_violations(self, image_path):
         """
@@ -43,34 +56,55 @@ class SimpleSafetyDetector:
             # First, analyze the image to understand what we're looking at
             image_analysis = self._analyze_image_content(img_array)
             
+            # Detect faces (for improved helmet and glove logic)
+            face_boxes = self._detect_faces(img_array)
+            
             # Only run specific detections based on what we see
             self.logger.info(f"Image analysis: {image_analysis}")
             
-            # Check for helmet violations only if we detect a person/head area
-            if image_analysis['has_person_like_content'] and self._simulate_helmet_violation(img_array):
-                violations.append({
-                    'type': 'helmet_violation',
-                    'message': 'No helmet detected!',
-                    'confidence': 0.85,
-                    'bbox': [50, 50, 200, 150]
-                })
+            # Check for helmet violations using faces when available
+            if face_boxes:
+                for (x1, y1, x2, y2) in face_boxes:
+                    if self._helmet_missing_near_face(img_array, (x1, y1, x2, y2)):
+                        violations.append({
+                            'type': 'helmet_violation',
+                            'message': 'No helmet detected!',
+                            'confidence': 0.85,
+                            'bbox': [x1, max(0, y1 - (y2 - y1)), x2, y2]
+                        })
+            else:
+                if image_analysis['has_person_like_content'] and self._simulate_helmet_violation(img_array):
+                    height, width = img_array.shape[:2]
+                    bbox = self._calculate_head_bbox(width, height)
+                    violations.append({
+                        'type': 'helmet_violation',
+                        'message': 'No helmet detected!',
+                        'confidence': 0.85,
+                        'bbox': bbox
+                    })
             
             # Check for glove violations only if we detect hand-like content
-            if image_analysis['has_hand_like_content'] and self._simulate_glove_violation(img_array):
+            if image_analysis['has_hand_like_content'] and self._simulate_glove_violation(img_array, face_boxes):
+                # Calculate better bounding box for hands
+                height, width = img_array.shape[:2]
+                bbox = self._calculate_hand_bbox(width, height)
                 violations.append({
                     'type': 'glove_violation', 
                     'message': 'No gloves detected!',
                     'confidence': 0.78,
-                    'bbox': [300, 100, 450, 200]
+                    'bbox': bbox
                 })
             
             # Check for warning zone violations only if we detect people
             if image_analysis['has_person_like_content'] and self._simulate_warning_zone_violation(img_array):
+                # Calculate better bounding box for person
+                height, width = img_array.shape[:2]
+                bbox = self._calculate_person_bbox(width, height)
                 violations.append({
                     'type': 'warning_zone_violation',
                     'message': 'Person detected in warning zone!',
                     'confidence': 0.92,
-                    'bbox': [100, 300, 250, 400]
+                    'bbox': bbox
                 })
                 
         except Exception as e:
@@ -125,7 +159,7 @@ class SimpleSafetyDetector:
     
     def _simulate_helmet_violation(self, img_array):
         """Simulate helmet detection based on image properties"""
-        # More sophisticated heuristic: look for human-like shapes and check for helmet-like features
+        # Look for human-like shapes and check for helmet-like features
         # This is still a placeholder - in production, use trained YOLO models
         
         # Check if image has reasonable dimensions and color distribution
@@ -142,12 +176,45 @@ class SimpleSafetyDetector:
         skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
         skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
         
-        # Only trigger if there's a significant amount of skin-like pixels
-        # This helps avoid false positives on simple hand images
-        # Make it much more conservative - only trigger on complex warehouse scenes
-        return skin_percentage > 0.3 and np.mean(red_channel) > 150 and np.var(img_array) > 2000
+        # Calculate image complexity
+        color_variance = np.var(img_array)
+        height, width = img_array.shape[:2]
+        
+        # Look for bright/white regions that might be helmets
+        # Helmets are often white, yellow, or bright colors
+        bright_regions = (red_channel > 200) | (green_channel > 200) | (blue_channel > 200)
+        bright_percentage = np.sum(bright_regions) / (img_array.shape[0] * img_array.shape[1])
+        
+        # Check for high-visibility colors (yellow, orange, bright green)
+        high_vis_colors = (
+            (red_channel > 180) & (green_channel > 180) & (blue_channel < 100) |  # Yellow
+            (red_channel > 200) & (green_channel > 150) & (blue_channel < 100) |  # Orange
+            (red_channel < 100) & (green_channel > 200) & (blue_channel < 100)   # Bright green
+        )
+        high_vis_percentage = np.sum(high_vis_colors) / (img_array.shape[0] * img_array.shape[1])
+        
+        # For helmet detection, we want to detect when someone is NOT wearing a helmet
+        # This should trigger when we see skin-like regions that could be a head/face
+        # BUT NOT when we see bright regions that could be helmets
+        has_skin_content = skin_percentage > 0.05  # At least 5% skin-like pixels
+        has_complexity = color_variance > 500  # Some color variation
+        has_reasonable_size = height > 100 and width > 100  # Not too small
+        
+        # Check if there are bright regions that might be helmets
+        has_potential_helmet = bright_percentage > 0.02 or high_vis_percentage > 0.01
+        
+        # Only trigger helmet violation if we see skin but NO potential helmet
+        has_head_like_features = (
+            has_skin_content and 
+            has_complexity and 
+            has_reasonable_size and
+            np.mean(red_channel) > 120 and  # Reasonable skin tone
+            not has_potential_helmet  # No bright regions that could be helmets
+        )
+        
+        return has_head_like_features
     
-    def _simulate_glove_violation(self, img_array):
+    def _simulate_glove_violation(self, img_array, face_boxes=None):
         """Simulate glove detection"""
         # Look for hand-like shapes and check if they appear to be bare hands
         if len(img_array.shape) != 3:
@@ -157,6 +224,17 @@ class SimpleSafetyDetector:
         red_channel = img_array[:, :, 0]
         green_channel = img_array[:, :, 1]
         blue_channel = img_array[:, :, 2]
+        
+        # If faces are detected, mask out face regions to avoid mislabeling faces as hands
+        if face_boxes:
+            mask = np.ones(red_channel.shape, dtype=bool)
+            for (x1, y1, x2, y2) in face_boxes:
+                x1c, y1c = max(0, x1), max(0, y1)
+                x2c, y2c = min(red_channel.shape[1]-1, x2), min(red_channel.shape[0]-1, y2)
+                mask[y1c:y2c, x1c:x2c] = False
+            red_channel = red_channel.copy(); red_channel[~mask] = 0
+            green_channel = green_channel.copy(); green_channel[~mask] = 0
+            blue_channel = blue_channel.copy(); blue_channel[~mask] = 0
         
         # Look for skin-like colors (more sophisticated detection)
         # Skin tones typically have: red > green > blue, and red > 100
@@ -191,7 +269,7 @@ class SimpleSafetyDetector:
     def _simulate_warning_zone_violation(self, img_array):
         """Simulate warning zone detection"""
         # This should only trigger if there are people in restricted areas
-        # For now, make it much more conservative to avoid false positives
+        # For now, make it more conservative to avoid false positives
         if len(img_array.shape) != 3:
             return False
             
@@ -205,9 +283,93 @@ class SimpleSafetyDetector:
         human_like = (red_channel > 80) & (green_channel > 80) & (blue_channel > 80)
         human_percentage = np.sum(human_like) / (img_array.shape[0] * img_array.shape[1])
         
-        # Only trigger if there's a significant human-like presence
-        # Make it much more conservative - only trigger on complex warehouse scenes
-        return human_percentage > 0.25 and np.mean(blue_channel) > 150 and np.var(img_array) > 2500
+        # Calculate image complexity
+        color_variance = np.var(img_array)
+        height, width = img_array.shape[:2]
+        
+        # For warning zone detection, we want to detect people in restricted areas
+        # This should trigger when we see human-like content in what might be a restricted zone
+        has_human_content = human_percentage > 0.10  # At least 10% human-like pixels
+        has_complexity = color_variance > 800  # Some color variation
+        has_reasonable_size = height > 100 and width > 100  # Not too small
+        
+        # Additional check: look for person-like features
+        has_person_like_features = (
+            has_human_content and 
+            has_complexity and 
+            has_reasonable_size and
+            np.mean(blue_channel) > 100  # Reasonable color distribution
+        )
+        
+        return has_person_like_features
+    
+    def _calculate_head_bbox(self, width, height):
+        """Calculate bounding box for head area"""
+        # Place box in upper portion of image where heads typically are
+        box_width = min(width // 4, 150)
+        box_height = min(height // 6, 120)
+        x = width // 4  # Slightly left of center
+        y = height // 8  # Upper portion
+        return [x, y, x + box_width, y + box_height]
+    
+    def _calculate_hand_bbox(self, width, height):
+        """Calculate bounding box for hand area"""
+        # Place box in middle-right area where hands might be
+        box_width = min(width // 5, 120)
+        box_height = min(height // 8, 100)
+        x = width * 3 // 5  # Right side
+        y = height // 3  # Middle area
+        return [x, y, x + box_width, y + box_height]
+    
+    def _calculate_person_bbox(self, width, height):
+        """Calculate bounding box for person"""
+        # Place box in center area where people typically are
+        box_width = min(width // 3, 200)
+        box_height = min(height // 2, 300)
+        x = width // 3  # Left side
+        y = height // 4  # Upper-middle
+        return [x, y, x + box_width, y + box_height]
+
+    # ----- OpenCV-assisted helpers -----
+    def _detect_faces(self, img_array):
+        """Detect faces using OpenCV Haar cascades; returns list of [x1,y1,x2,y2]"""
+        if self.face_cascade is None:
+            return []
+        try:
+            # Convert RGB (PIL order) to grayscale for detection
+            gray = None
+            if img_array.ndim == 3:
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img_array
+            faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+            boxes = []
+            for (x, y, w, h) in faces:
+                boxes.append([int(x), int(y), int(x + w), int(y + h)])
+            return boxes
+        except Exception:
+            return []
+
+    def _helmet_missing_near_face(self, img_array, face_box):
+        """Heuristic: check area above face for bright/high-vis helmet; return True if absent."""
+        x1, y1, x2, y2 = face_box
+        h = y2 - y1
+        # Region above face (possible helmet area)
+        top_y1 = max(0, y1 - int(0.8 * h))
+        top_y2 = y1
+        left = max(0, x1 - int(0.1 * (x2 - x1)))
+        right = min(img_array.shape[1], x2 + int(0.1 * (x2 - x1)))
+        if top_y2 <= top_y1 or right <= left:
+            return True
+        region = img_array[top_y1:top_y2, left:right]
+        if region.size == 0:
+            return True
+        r, g, b = region[:, :, 0], region[:, :, 1], region[:, :, 2]
+        bright = (r > 200) | (g > 200) | (b > 200)
+        high_vis = ((r > 180) & (g > 180) & (b < 110)) | ((r > 200) & (g > 150) & (b < 110)) | ((r < 110) & (g > 200) & (b < 110))
+        helmet_ratio = (np.sum(bright | high_vis) / (region.shape[0] * region.shape[1])) if region.size else 0.0
+        # If enough bright/high-vis pixels are above the face, assume helmet present
+        return helmet_ratio < 0.06
 
 class SimpleAlarmSystem:
     """Simple alarm system using winsound"""
