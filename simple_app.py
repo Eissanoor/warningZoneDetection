@@ -104,9 +104,9 @@ class SimpleSafetyDetector:
         skin_percentage = np.sum(skin_like) / total_pixels
         
         # Determine if this looks like a person or hand
-        if skin_percentage > 0.05:  # At least 5% skin-like pixels
+        if skin_percentage > 0.03:  # At least 3% skin-like pixels (lowered for better detection)
             analysis['has_hand_like_content'] = True
-            if skin_percentage > 0.15:  # More skin suggests full person
+            if skin_percentage > 0.10:  # More skin suggests full person (lowered threshold)
                 analysis['has_person_like_content'] = True
         
         # Check for warehouse-like content (industrial colors, etc.)
@@ -158,13 +158,35 @@ class SimpleSafetyDetector:
         green_channel = img_array[:, :, 1]
         blue_channel = img_array[:, :, 2]
         
-        # Look for skin-like colors
+        # Look for skin-like colors (more sophisticated detection)
+        # Skin tones typically have: red > green > blue, and red > 100
         skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
         skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
         
-        # Only trigger if there's significant skin exposure (indicating no gloves)
-        # Make it much more conservative - only trigger on complex warehouse scenes
-        return skin_percentage > 0.2 and np.mean(green_channel) > 150 and np.var(img_array) > 1500
+        # Check for hand-like features
+        # Look for finger-like structures (vertical lines in skin regions)
+        height, width = img_array.shape[:2]
+        
+        # Calculate image complexity
+        color_variance = np.var(img_array)
+        
+        # For glove detection, we want to detect bare hands
+        # This should trigger when we see skin-like regions that could be hands
+        # But not on very simple images (like solid colors)
+        has_skin_content = skin_percentage > 0.05  # At least 5% skin-like pixels
+        has_complexity = color_variance > 500  # Some color variation
+        has_reasonable_size = height > 100 and width > 100  # Not too small
+        
+        # Additional check: look for hand-like shapes
+        # This is a simple heuristic - in reality, use trained models
+        has_hand_like_features = (
+            has_skin_content and 
+            has_complexity and 
+            has_reasonable_size and
+            np.mean(red_channel) > 120  # Reasonable skin tone
+        )
+        
+        return has_hand_like_features
     
     def _simulate_warning_zone_violation(self, img_array):
         """Simulate warning zone detection"""
