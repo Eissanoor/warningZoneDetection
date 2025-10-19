@@ -7,3 +7,4 @@ matplotlib
 pandas
 tqdm
 psutil
+opencv-python

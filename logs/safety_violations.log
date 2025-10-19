@@ -87,3 +87,31 @@
   - No gloves detected! (Confidence: 0.78)
   - Person detected in warning zone! (Confidence: 0.92)
 --------------------------------------------------
+
+[2025-10-19 19:10:11] Safety Violations:
+  - No gloves detected! (Confidence: 0.78)
+  - Person detected in warning zone! (Confidence: 0.92)
+--------------------------------------------------
+
+[2025-10-19 19:12:41] Safety Violations:
+  - No gloves detected! (Confidence: 0.78)
+  - Person detected in warning zone! (Confidence: 0.92)
+--------------------------------------------------
+
+[2025-10-19 19:13:07] Safety Violations:
+  - No helmet detected! (Confidence: 0.85)
+  - No gloves detected! (Confidence: 0.78)
+  - Person detected in warning zone! (Confidence: 0.92)
+--------------------------------------------------
+
+[2025-10-19 19:19:23] Safety Violations:
+  - No helmet detected! (Confidence: 0.85)
+  - No gloves detected! (Confidence: 0.78)
+  - Person detected in warning zone! (Confidence: 0.92)
+--------------------------------------------------
+
+[2025-10-19 19:21:32] Safety Violations:
+  - No helmet detected! (Confidence: 0.85)
+  - No gloves detected! (Confidence: 0.78)
+  - Person detected in warning zone! (Confidence: 0.92)
+--------------------------------------------------

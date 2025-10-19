@@ -59,11 +59,15 @@ class SimpleSafetyDetector:
             # Detect faces (for improved helmet and glove logic)
             face_boxes = self._detect_faces(img_array)
             
+            # Determine if there is likely a whole person (not just a hand)
+            # Need much higher skin percentage for full person vs just a hand
+            person_present = bool(face_boxes) or image_analysis.get('skin_percentage', 0.0) > 0.20
+            
             # Only run specific detections based on what we see
             self.logger.info(f"Image analysis: {image_analysis}")
             
             # Check for helmet violations using faces when available
-            if face_boxes:
+            if person_present and face_boxes:
                 for (x1, y1, x2, y2) in face_boxes:
                     if self._helmet_missing_near_face(img_array, (x1, y1, x2, y2)):
                         violations.append({
@@ -72,8 +76,8 @@ class SimpleSafetyDetector:
                             'confidence': 0.85,
                             'bbox': [x1, max(0, y1 - (y2 - y1)), x2, y2]
                         })
-            else:
-                if image_analysis['has_person_like_content'] and self._simulate_helmet_violation(img_array):
+            elif person_present:
+                if self._simulate_helmet_violation(img_array):
                     height, width = img_array.shape[:2]
                     bbox = self._calculate_head_bbox(width, height)
                     violations.append({
@@ -95,8 +99,8 @@ class SimpleSafetyDetector:
                     'bbox': bbox
                 })
             
-            # Check for warning zone violations only if we detect people
-            if image_analysis['has_person_like_content'] and self._simulate_warning_zone_violation(img_array):
+            # Check for warning zone violations only if we detect people (not just hands)
+            if person_present and self._simulate_warning_zone_violation(img_array):
                 # Calculate better bounding box for person
                 height, width = img_array.shape[:2]
                 bbox = self._calculate_person_bbox(width, height)
@@ -118,7 +122,8 @@ class SimpleSafetyDetector:
             'has_person_like_content': False,
             'has_hand_like_content': False,
             'has_warehouse_content': False,
-            'image_complexity': 'low'
+            'image_complexity': 'low',
+            'skin_percentage': 0.0
         }
         
         if len(img_array.shape) != 3:
@@ -136,11 +141,12 @@ class SimpleSafetyDetector:
         # Look for skin-like colors
         skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
         skin_percentage = np.sum(skin_like) / total_pixels
+        analysis['skin_percentage'] = float(skin_percentage)
         
         # Determine if this looks like a person or hand
-        if skin_percentage > 0.03:  # At least 3% skin-like pixels (lowered for better detection)
+        if skin_percentage > 0.02:  # At least 2% skin-like pixels for hand detection
             analysis['has_hand_like_content'] = True
-            if skin_percentage > 0.10:  # More skin suggests full person (lowered threshold)
+            if skin_percentage > 0.15:  # Much higher threshold for full person detection
                 analysis['has_person_like_content'] = True
         
         # Check for warehouse-like content (industrial colors, etc.)
@@ -180,35 +186,29 @@ class SimpleSafetyDetector:
         color_variance = np.var(img_array)
         height, width = img_array.shape[:2]
         
-        # Look for bright/white regions that might be helmets
-        # Helmets are often white, yellow, or bright colors
-        bright_regions = (red_channel > 200) | (green_channel > 200) | (blue_channel > 200)
-        bright_percentage = np.sum(bright_regions) / (img_array.shape[0] * img_array.shape[1])
-        
-        # Check for high-visibility colors (yellow, orange, bright green)
-        high_vis_colors = (
-            (red_channel > 180) & (green_channel > 180) & (blue_channel < 100) |  # Yellow
-            (red_channel > 200) & (green_channel > 150) & (blue_channel < 100) |  # Orange
-            (red_channel < 100) & (green_channel > 200) & (blue_channel < 100)   # Bright green
-        )
-        high_vis_percentage = np.sum(high_vis_colors) / (img_array.shape[0] * img_array.shape[1])
+        # Look for colors typical of industrial hard hats (white or safety-yellow)
+        # NOTE: Red helmets (like bike helmets) should NOT count as safety hard hats
+        white_regions = (red_channel > 210) & (green_channel > 210) & (blue_channel > 210)
+        yellow_regions = (red_channel > 185) & (green_channel > 185) & (blue_channel < 140)
+        white_percentage = np.sum(white_regions) / (img_array.shape[0] * img_array.shape[1])
+        yellow_percentage = np.sum(yellow_regions) / (img_array.shape[0] * img_array.shape[1])
         
         # For helmet detection, we want to detect when someone is NOT wearing a helmet
         # This should trigger when we see skin-like regions that could be a head/face
         # BUT NOT when we see bright regions that could be helmets
-        has_skin_content = skin_percentage > 0.05  # At least 5% skin-like pixels
-        has_complexity = color_variance > 500  # Some color variation
+        has_skin_content = skin_percentage > 0.03  # At least 3% skin-like pixels (lowered)
+        has_complexity = color_variance > 300  # Some color variation (lowered)
         has_reasonable_size = height > 100 and width > 100  # Not too small
         
-        # Check if there are bright regions that might be helmets
-        has_potential_helmet = bright_percentage > 0.02 or high_vis_percentage > 0.01
+        # Check if there are white/yellow regions that might be industrial helmets
+        has_potential_helmet = (white_percentage > 0.015) or (yellow_percentage > 0.02)
         
         # Only trigger helmet violation if we see skin but NO potential helmet
         has_head_like_features = (
             has_skin_content and 
             has_complexity and 
             has_reasonable_size and
-            np.mean(red_channel) > 120 and  # Reasonable skin tone
+            np.mean(red_channel) > 100 and  # Reasonable skin tone (lowered)
             not has_potential_helmet  # No bright regions that could be helmets
         )
         
