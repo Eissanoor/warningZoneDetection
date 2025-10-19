@@ -40,11 +40,14 @@ class SimpleSafetyDetector:
             # Convert to numpy array
             img_array = np.array(image)
             
-            # Simulate detection based on image properties
-            # In a real implementation, this would use trained models
+            # First, analyze the image to understand what we're looking at
+            image_analysis = self._analyze_image_content(img_array)
             
-            # Check for helmet violations (simulate based on image analysis)
-            if self._simulate_helmet_violation(img_array):
+            # Only run specific detections based on what we see
+            self.logger.info(f"Image analysis: {image_analysis}")
+            
+            # Check for helmet violations only if we detect a person/head area
+            if image_analysis['has_person_like_content'] and self._simulate_helmet_violation(img_array):
                 violations.append({
                     'type': 'helmet_violation',
                     'message': 'No helmet detected!',
@@ -52,8 +55,8 @@ class SimpleSafetyDetector:
                     'bbox': [50, 50, 200, 150]
                 })
             
-            # Check for glove violations
-            if self._simulate_glove_violation(img_array):
+            # Check for glove violations only if we detect hand-like content
+            if image_analysis['has_hand_like_content'] and self._simulate_glove_violation(img_array):
                 violations.append({
                     'type': 'glove_violation', 
                     'message': 'No gloves detected!',
@@ -61,8 +64,8 @@ class SimpleSafetyDetector:
                     'bbox': [300, 100, 450, 200]
                 })
             
-            # Check for warning zone violations
-            if self._simulate_warning_zone_violation(img_array):
+            # Check for warning zone violations only if we detect people
+            if image_analysis['has_person_like_content'] and self._simulate_warning_zone_violation(img_array):
                 violations.append({
                     'type': 'warning_zone_violation',
                     'message': 'Person detected in warning zone!',
@@ -75,20 +78,114 @@ class SimpleSafetyDetector:
             
         return violations
     
+    def _analyze_image_content(self, img_array):
+        """Analyze image to understand what content is present"""
+        analysis = {
+            'has_person_like_content': False,
+            'has_hand_like_content': False,
+            'has_warehouse_content': False,
+            'image_complexity': 'low'
+        }
+        
+        if len(img_array.shape) != 3:
+            return analysis
+            
+        # Analyze image characteristics
+        height, width = img_array.shape[:2]
+        total_pixels = height * width
+        
+        # Check for skin-tone regions (indicating people/hands)
+        red_channel = img_array[:, :, 0]
+        green_channel = img_array[:, :, 1]
+        blue_channel = img_array[:, :, 2]
+        
+        # Look for skin-like colors
+        skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
+        skin_percentage = np.sum(skin_like) / total_pixels
+        
+        # Determine if this looks like a person or hand
+        if skin_percentage > 0.05:  # At least 5% skin-like pixels
+            analysis['has_hand_like_content'] = True
+            if skin_percentage > 0.15:  # More skin suggests full person
+                analysis['has_person_like_content'] = True
+        
+        # Check for warehouse-like content (industrial colors, etc.)
+        # This is a very basic heuristic
+        avg_brightness = np.mean(img_array)
+        color_variance = np.var(img_array)
+        
+        if avg_brightness > 100 and color_variance > 1000:
+            analysis['has_warehouse_content'] = True
+            analysis['image_complexity'] = 'medium'
+        
+        if color_variance > 2000:
+            analysis['image_complexity'] = 'high'
+            
+        return analysis
+    
     def _simulate_helmet_violation(self, img_array):
         """Simulate helmet detection based on image properties"""
-        # Simple heuristic: check if image has certain color patterns
-        # In reality, this would use a trained model
-        return len(img_array.shape) == 3 and np.mean(img_array[:, :, 0]) > 100
-    
+        # More sophisticated heuristic: look for human-like shapes and check for helmet-like features
+        # This is still a placeholder - in production, use trained YOLO models
+        
+        # Check if image has reasonable dimensions and color distribution
+        if len(img_array.shape) != 3:
+            return False
+            
+        # Look for skin-tone colors (indicating exposed head/face)
+        # Skin tones typically have higher red values and moderate green/blue
+        red_channel = img_array[:, :, 0]
+        green_channel = img_array[:, :, 1] 
+        blue_channel = img_array[:, :, 2]
+        
+        # Check for skin-like regions (this is a very basic heuristic)
+        skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
+        skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
+        
+        # Only trigger if there's a significant amount of skin-like pixels
+        # This helps avoid false positives on simple hand images
+        # Make it much more conservative - only trigger on complex warehouse scenes
+        return skin_percentage > 0.3 and np.mean(red_channel) > 150 and np.var(img_array) > 2000
     
     def _simulate_glove_violation(self, img_array):
         """Simulate glove detection"""
-        return len(img_array.shape) == 3 and np.mean(img_array[:, :, 1]) > 120
+        # Look for hand-like shapes and check if they appear to be bare hands
+        if len(img_array.shape) != 3:
+            return False
+            
+        # Check for skin-tone regions that might be bare hands
+        red_channel = img_array[:, :, 0]
+        green_channel = img_array[:, :, 1]
+        blue_channel = img_array[:, :, 2]
+        
+        # Look for skin-like colors
+        skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
+        skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
+        
+        # Only trigger if there's significant skin exposure (indicating no gloves)
+        # Make it much more conservative - only trigger on complex warehouse scenes
+        return skin_percentage > 0.2 and np.mean(green_channel) > 150 and np.var(img_array) > 1500
     
     def _simulate_warning_zone_violation(self, img_array):
         """Simulate warning zone detection"""
-        return len(img_array.shape) == 3 and np.mean(img_array[:, :, 2]) > 110
+        # This should only trigger if there are people in restricted areas
+        # For now, make it much more conservative to avoid false positives
+        if len(img_array.shape) != 3:
+            return False
+            
+        # Look for human-like shapes (this is very basic)
+        # In reality, this would use person detection + zone mapping
+        red_channel = img_array[:, :, 0]
+        green_channel = img_array[:, :, 1]
+        blue_channel = img_array[:, :, 2]
+        
+        # Check for human-like color patterns
+        human_like = (red_channel > 80) & (green_channel > 80) & (blue_channel > 80)
+        human_percentage = np.sum(human_like) / (img_array.shape[0] * img_array.shape[1])
+        
+        # Only trigger if there's a significant human-like presence
+        # Make it much more conservative - only trigger on complex warehouse scenes
+        return human_percentage > 0.25 and np.mean(blue_channel) > 150 and np.var(img_array) > 2500
 
 class SimpleAlarmSystem:
     """Simple alarm system using winsound"""
