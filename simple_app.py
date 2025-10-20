@@ -52,7 +52,16 @@ class SimpleSafetyDetector:
             
             # Convert to numpy array
             img_array = np.array(image)
+            violations = self.detect_safety_violations_from_array(img_array)
+        except Exception as e:
+            self.logger.error(f"Error in detection: {str(e)}")
             
+        return violations
+
+    def detect_safety_violations_from_array(self, img_array):
+        """Same as detect_safety_violations but takes an RGB numpy array."""
+        violations = []
+        try:
             # First, analyze the image to understand what we're looking at
             image_analysis = self._analyze_image_content(img_array)
             
@@ -115,10 +124,8 @@ class SimpleSafetyDetector:
                     'confidence': 0.92,
                     'bbox': bbox
                 })
-                
         except Exception as e:
             self.logger.error(f"Error in detection: {str(e)}")
-            
         return violations
     
     def _analyze_image_content(self, img_array):
