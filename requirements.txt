@@ -8,3 +8,5 @@ pandas
 tqdm
 psutil
 opencv-python
+ultralytics
+flask

@@ -313,7 +313,7 @@ def analyze_image():
         file.save(temp_path)
         
         try:
-            # Analyze image
+            # Analyze image with improved detector
             violations = detector.detect_safety_violations(temp_path)
             
             result_image_b64 = None

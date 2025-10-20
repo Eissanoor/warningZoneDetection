@@ -6,7 +6,7 @@ Press 'q' to quit.
 
 import cv2
 import numpy as np
-from simple_app import SimpleSafetyDetector
+from src.detectors import SafetyDetector
 
 
 def draw_boxes(frame_bgr, violations):
@@ -31,7 +31,12 @@ def main():
         print('ERROR: Cannot open camera')
         return
 
-    detector = SimpleSafetyDetector()
+    detector = SafetyDetector(
+        helmet_enabled=True,
+        glove_enabled=True,
+        warning_zone_enabled=True,
+        confidence_threshold=0.5
+    )
 
     while True:
         ret, frame = cap.read()
@@ -40,7 +45,18 @@ def main():
 
         # Convert BGR -> RGB for detector
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        violations = detector.detect_safety_violations_from_array(rgb)
+        detection_results = detector.detect_image(rgb)
+        
+        # Convert detection results to violation format
+        violations = []
+        for result in detection_results:
+            violation = {
+                'type': result['type'],
+                'message': f"{result['class']} detected!",
+                'confidence': result['confidence'],
+                'bbox': result['bbox']
+            }
+            violations.append(violation)
 
         # Overlay results
         frame = draw_boxes(frame, violations)

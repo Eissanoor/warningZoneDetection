@@ -176,59 +176,60 @@ class SimpleSafetyDetector:
         return analysis
     
     def _simulate_helmet_violation(self, img_array):
-        """Simulate helmet detection based on image properties"""
-        # Look for human-like shapes and check for helmet-like features
-        # This is still a placeholder - in production, use trained YOLO models
+        """Improved helmet detection logic"""
+        # This is an improved heuristic-based helmet detection
+        # In production, this should be replaced with trained YOLOv8 models
         
-        # Check if image has reasonable dimensions and color distribution
         if len(img_array.shape) != 3:
             return False
             
         # Look for skin-tone colors (indicating exposed head/face)
-        # Skin tones typically have higher red values and moderate green/blue
         red_channel = img_array[:, :, 0]
         green_channel = img_array[:, :, 1] 
         blue_channel = img_array[:, :, 2]
         
-        # Check for skin-like regions (this is a very basic heuristic)
-        skin_like = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
+        # Improved skin detection
+        skin_like = (red_channel > 95) & (red_channel > green_channel + 10) & (red_channel > blue_channel + 10)
         skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
         
-        # Calculate image complexity
+        # Calculate image characteristics
         color_variance = np.var(img_array)
         height, width = img_array.shape[:2]
         
-        # Look for colors typical of industrial hard hats (white or safety-yellow)
-        # NOTE: Red helmets (like bike helmets) should NOT count as safety hard hats
-        white_regions = (red_channel > 210) & (green_channel > 210) & (blue_channel > 210)
-        yellow_regions = (red_channel > 185) & (green_channel > 185) & (blue_channel < 140)
+        # Look for helmet-like colors (white, yellow, bright colors)
+        white_regions = (red_channel > 220) & (green_channel > 220) & (blue_channel > 220)
+        yellow_regions = (red_channel > 180) & (green_channel > 180) & (blue_channel < 130)
+        bright_regions = (red_channel > 200) | (green_channel > 200) | (blue_channel > 200)
+        
         white_percentage = np.sum(white_regions) / (img_array.shape[0] * img_array.shape[1])
         yellow_percentage = np.sum(yellow_regions) / (img_array.shape[0] * img_array.shape[1])
+        bright_percentage = np.sum(bright_regions) / (img_array.shape[0] * img_array.shape[1])
         
-        # For helmet detection, we want to detect when someone is NOT wearing a helmet
-        # This should trigger when we see skin-like regions that could be a head/face
-        # BUT NOT when we see bright regions that could be helmets
-        has_skin_content = skin_percentage > 0.03  # At least 3% skin-like pixels (lowered)
-        has_complexity = color_variance > 300  # Some color variation (lowered)
-        has_reasonable_size = height > 100 and width > 100  # Not too small
+        # Improved detection logic
+        has_skin_content = skin_percentage > 0.025  # Lowered threshold for better detection
+        has_complexity = color_variance > 250  # Lowered threshold
+        has_reasonable_size = height > 80 and width > 80  # Lowered size requirement
         
-        # Check if there are white/yellow regions that might be industrial helmets
-        has_potential_helmet = (white_percentage > 0.015) or (yellow_percentage > 0.02)
+        # Check for helmet presence
+        has_helmet_colors = (white_percentage > 0.01) or (yellow_percentage > 0.015) or (bright_percentage > 0.05)
         
-        # Only trigger helmet violation if we see skin but NO potential helmet
-        has_head_like_features = (
+        # More conservative helmet violation detection
+        # Only trigger if we see clear skin content but no helmet-like colors
+        helmet_violation = (
             has_skin_content and 
             has_complexity and 
             has_reasonable_size and
-            np.mean(red_channel) > 100 and  # Reasonable skin tone (lowered)
-            not has_potential_helmet  # No bright regions that could be helmets
+            np.mean(red_channel) > 90 and  # Reasonable color range
+            not has_helmet_colors  # No helmet-like colors present
         )
         
-        return has_head_like_features
+        return helmet_violation
     
     def _simulate_glove_violation(self, img_array, face_boxes=None):
-        """Simulate glove detection"""
-        # Look for hand-like shapes and check if they appear to be bare hands
+        """Improved glove detection logic"""
+        # This is an improved heuristic-based glove detection
+        # In production, this should be replaced with trained YOLOv8 models
+        
         if len(img_array.shape) != 3:
             return False
             
@@ -248,55 +249,39 @@ class SimpleSafetyDetector:
             green_channel = green_channel.copy(); green_channel[~mask] = 0
             blue_channel = blue_channel.copy(); blue_channel[~mask] = 0
         
-        # Look for skin-like colors (more robust using HSV as well)
-        # RGB heuristic
-        skin_like_rgb = (red_channel > 100) & (red_channel > green_channel) & (red_channel > blue_channel)
-        # HSV heuristic to reject purple/blue gloves
-        try:
-            hsv = None
-            if cv2 is not None:
-                hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
-        except Exception:
-            hsv = None
-        if hsv is not None:
-            h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-            # Skin typically: low-to-medium hue, sufficient saturation and value
-            skin_like_hsv = (h < 25) | (h > 160)
-            skin_like_hsv = skin_like_hsv & (s > 40) & (v > 50)
-            skin_like = skin_like_rgb | skin_like_hsv
-            # Glove colors: purple/blue/gray commonly used for disposable gloves
-            purple_mask = ((h >= 120) & (h <= 155)) & (s > 50) & (v > 40)
-            blue_mask = ((h >= 90) & (h < 120)) & (s > 40) & (v > 40)
-            gray_mask = (s < 30) & (v > 60) & (v < 210)
-            glove_colored_ratio = (np.sum(purple_mask | blue_mask | gray_mask) / (img_array.shape[0] * img_array.shape[1]))
-        else:
-            skin_like = skin_like_rgb
-            glove_colored_ratio = 0.0
-        skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
+        # Improved skin detection
+        skin_like_rgb = (red_channel > 95) & (red_channel > green_channel + 8) & (red_channel > blue_channel + 8)
+        skin_percentage = np.sum(skin_like_rgb) / (img_array.shape[0] * img_array.shape[1])
         
-        # Check for hand-like features
-        # Look for finger-like structures (vertical lines in skin regions)
+        # Look for glove-like colors (blue, purple, gray, white)
+        glove_like_colors = (
+            (blue_channel > red_channel + 20) |  # Blue gloves
+            (red_channel > 200) & (green_channel > 200) & (blue_channel > 200) |  # White gloves
+            (red_channel < 150) & (green_channel < 150) & (blue_channel < 150) &  # Gray gloves
+            (red_channel > 100) & (green_channel > 100) & (blue_channel > 100)
+        )
+        glove_percentage = np.sum(glove_like_colors) / (img_array.shape[0] * img_array.shape[1])
+        
+        # Calculate image characteristics
+        color_variance = np.var(img_array)
         height, width = img_array.shape[:2]
         
-        # Calculate image complexity
-        color_variance = np.var(img_array)
+        # Improved detection logic for bare hands
+        has_skin_content = skin_percentage > 0.04  # Lowered threshold
+        has_glove_content = glove_percentage > 0.05  # Check for glove colors
+        has_complexity = color_variance > 400  # Lowered threshold
+        has_reasonable_size = height > 80 and width > 80  # Lowered size requirement
         
-        # For glove detection, we want to detect bare hands.
-        # Only trigger if skin signal is clearly stronger than glove-like colors.
-        has_skin_content = skin_percentage > 0.06 and skin_percentage > (glove_colored_ratio * 1.5)
-        has_complexity = color_variance > 500  # Some color variation
-        has_reasonable_size = height > 100 and width > 100  # Not too small
-        
-        # Additional check: look for hand-like shapes
-        # This is a simple heuristic - in reality, use trained models
-        has_hand_like_features = (
+        # Only trigger glove violation if we see skin but no glove-like colors
+        glove_violation = (
             has_skin_content and 
+            not has_glove_content and  # No glove-like colors present
             has_complexity and 
             has_reasonable_size and
-            np.mean(red_channel) > 120  # Reasonable skin tone
+            np.mean(red_channel) > 100  # Reasonable color range
         )
         
-        return has_hand_like_features
+        return glove_violation
     
     def _simulate_warning_zone_violation(self, img_array):
         """Simulate warning zone detection"""
