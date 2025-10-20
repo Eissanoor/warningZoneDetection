@@ -86,7 +86,7 @@ class SimpleSafetyDetector:
                         violations.append({
                             'type': 'helmet_violation',
                             'message': 'No helmet detected!',
-                            'confidence': 0.85,
+                            'confidence': 0.90,
                             'bbox': [x1, max(0, y1 - (y2 - y1)), x2, y2]
                         })
             elif person_present:
@@ -96,7 +96,20 @@ class SimpleSafetyDetector:
                     violations.append({
                         'type': 'helmet_violation',
                         'message': 'No helmet detected!',
-                        'confidence': 0.85,
+                        'confidence': 0.88,
+                        'bbox': bbox
+                    })
+            
+            # Also check for helmet violations even when no faces are detected
+            # This helps catch people in the image even if face detection fails
+            if not person_present and image_analysis['has_person_like_content']:
+                if self._simulate_helmet_violation(img_array):
+                    height, width = img_array.shape[:2]
+                    bbox = self._calculate_head_bbox(width, height)
+                    violations.append({
+                        'type': 'helmet_violation',
+                        'message': 'No helmet detected!',
+                        'confidence': 0.75,
                         'bbox': bbox
                     })
             
@@ -155,10 +168,10 @@ class SimpleSafetyDetector:
         skin_percentage = np.sum(skin_like) / total_pixels
         analysis['skin_percentage'] = float(skin_percentage)
         
-        # Determine if this looks like a person or hand
-        if skin_percentage > 0.02:  # At least 2% skin-like pixels for hand detection
+        # Determine if this looks like a person or hand - more sensitive
+        if skin_percentage > 0.015:  # Lowered threshold for hand detection
             analysis['has_hand_like_content'] = True
-            if skin_percentage > 0.15:  # Much higher threshold for full person detection
+            if skin_percentage > 0.08:  # Lowered threshold for full person detection
                 analysis['has_person_like_content'] = True
         
         # Check for warehouse-like content (industrial colors, etc.)
@@ -176,8 +189,8 @@ class SimpleSafetyDetector:
         return analysis
     
     def _simulate_helmet_violation(self, img_array):
-        """Improved helmet detection logic"""
-        # This is an improved heuristic-based helmet detection
+        """Enhanced helmet detection logic - more sensitive to detect helmet violations"""
+        # This is an enhanced heuristic-based helmet detection
         # In production, this should be replaced with trained YOLOv8 models
         
         if len(img_array.shape) != 3:
@@ -188,8 +201,8 @@ class SimpleSafetyDetector:
         green_channel = img_array[:, :, 1] 
         blue_channel = img_array[:, :, 2]
         
-        # Improved skin detection
-        skin_like = (red_channel > 95) & (red_channel > green_channel + 10) & (red_channel > blue_channel + 10)
+        # Enhanced skin detection - more sensitive
+        skin_like = (red_channel > 80) & (red_channel > green_channel + 5) & (red_channel > blue_channel + 5)
         skin_percentage = np.sum(skin_like) / (img_array.shape[0] * img_array.shape[1])
         
         # Calculate image characteristics
@@ -205,21 +218,21 @@ class SimpleSafetyDetector:
         yellow_percentage = np.sum(yellow_regions) / (img_array.shape[0] * img_array.shape[1])
         bright_percentage = np.sum(bright_regions) / (img_array.shape[0] * img_array.shape[1])
         
-        # Improved detection logic
-        has_skin_content = skin_percentage > 0.025  # Lowered threshold for better detection
-        has_complexity = color_variance > 250  # Lowered threshold
-        has_reasonable_size = height > 80 and width > 80  # Lowered size requirement
+        # Enhanced detection logic - more sensitive
+        has_skin_content = skin_percentage > 0.015  # Much lower threshold for better detection
+        has_complexity = color_variance > 200  # Lowered threshold
+        has_reasonable_size = height > 60 and width > 60  # Lowered size requirement
         
-        # Check for helmet presence
-        has_helmet_colors = (white_percentage > 0.01) or (yellow_percentage > 0.015) or (bright_percentage > 0.05)
+        # Check for helmet presence - more strict
+        has_helmet_colors = (white_percentage > 0.005) or (yellow_percentage > 0.008) or (bright_percentage > 0.03)
         
-        # More conservative helmet violation detection
-        # Only trigger if we see clear skin content but no helmet-like colors
+        # More sensitive helmet violation detection
+        # Trigger if we see skin content but no clear helmet-like colors
         helmet_violation = (
             has_skin_content and 
             has_complexity and 
             has_reasonable_size and
-            np.mean(red_channel) > 90 and  # Reasonable color range
+            np.mean(red_channel) > 80 and  # Lowered color range threshold
             not has_helmet_colors  # No helmet-like colors present
         )
         
